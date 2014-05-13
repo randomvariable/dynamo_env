@@ -1,0 +1,32 @@
+#!/usr/bin/env ruby
+require 'net/http'
+
+require 'aws'
+require 'trollop'
+
+EC2_METADATA_URL = 'http://169.254.169.254/latest/meta-data/'
+opts = Trollop::options do
+  opt :table_name, 'Name of DynamoDB table to retrieve environment variables from.', type: :string
+  opt :lookup_tag, 'Name of EC2 tag to retrieve hashes', type: :string
+  opt :instance_id, 'Provide an instance id. Useful for testing', type: :string
+end
+
+ec2 = AWS::EC2.new
+instance_id = opts[:instance_id] ||= (Net::HTTP.get_response(URI.parse(EC2_METADATA_URL + 'instance_id'))).body
+instance = ec2.instances[instance_id]
+instance_vars = ((instance.tags.to_h.select { |k,v| k == opts[:lookup_tag] }).values[0]).split(',').map do |v| v.chomp end
+dynamo_db = AWS::DynamoDB.new
+table = dynamo_db.tables[opts[:table_name]]
+table.load_schema
+
+[*instance_vars].each do |v|
+  items = table.items[v]
+  [*items].each do |i|
+    attributes = i.attributes.to_h
+    attributes.each do |k, v|
+     puts "#{k.upcase}=#{v}"
+    end
+  end
+end
+
+
